@@ -1,0 +1,14 @@
+# ide cache & temp files
+.idea/
+__pycache__/
+
+# virtual environment
+venv/
+
+# important userdata
+scripts_info/
+config.*
+
+# logs
+logs/
+*.log*
