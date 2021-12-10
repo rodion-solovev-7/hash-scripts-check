@@ -2,23 +2,13 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from glob import glob
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Union, List, Any, Dict
-
-
-# Путь к файлу, куда будут записаны логи
-# (лог автоматически ротируется, если достигает определённого размера)
-LOG_FILENAME = './logs/hashscript.log'
-
-# Путь к конфигу .json, в котором записаны все пути к файлам, которые нужно проверить
-CONFIG_FILENAME = './config.json'
-
-# Папка, куда будут записаны json'ки с хешами и другими данными файлов
-SCRIPTS_INFO_FOLDER = './scripts_info'
 
 
 def setup_logger(
@@ -56,6 +46,21 @@ def setup_logger(
     return _logger
 
 
+def get_config(filename: str) -> dict:
+    """
+    Возвращает все данными, содержащимися в конфиге.
+
+    Args:
+        filename (str): путь к json-конфигу.
+
+    Returns:
+        dict: словарь со всеми данными из конфига.ы
+    """
+    with open(filename, 'r') as f:
+        config = json.load(f)
+    return config
+
+
 def get_file_list_from_json(filename: str) -> List[str]:
     """
     Читает список файлов из json.
@@ -66,12 +71,11 @@ def get_file_list_from_json(filename: str) -> List[str]:
     Returns:
         list: список путей к файлам, прочитанный из json-файла.
     """
-    with open(filename, 'r') as f:
-        config = json.load(f)
+    config = get_config(filename)
 
-        files = config['files']
-        assert isinstance(files, list), "files из конфига не является списком"
-        return files
+    files = config['files']
+    assert isinstance(files, list), "files из конфига не является списком"
+    return files
 
 
 def get_hash(filename: str) -> str:
@@ -153,17 +157,20 @@ def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
 
     Returns:
         dict: словарь с ключём-именем файла, содержащий словари с данными об этих файлах.
+        {}: пустой словарь в случае, если предыдущий файл с записями не существует или пуст.
     """
     last_info_filename = get_last_info_filename(folder)
-    if last_info_filename is not None:
-        try:
-            with open(last_info_filename, 'rb') as f:
-                prev_files_data = json.load(f)
-            return prev_files_data
+    if last_info_filename is None:
+        return {}
 
-        except Exception as e:
-            logger.error(f"Невозможно прочитать данные из '{last_info_filename}'", exc_info=e)
-            return {}
+    try:
+        with open(last_info_filename, 'rb') as f:
+            prev_files_data = json.load(f)
+        return prev_files_data
+
+    except Exception as e:
+        logger.error(f"Невозможно прочитать данные из '{last_info_filename}'", exc_info=e)
+        return {}
 
 
 def get_last_info_filename(folder: Union[str, Path]) -> Union[str, None]:
@@ -186,6 +193,35 @@ def get_last_info_filename(folder: Union[str, Path]) -> Union[str, None]:
     return None
 
 
+def mark_changed_files(
+        prev_records: Dict[str, Any],
+        curr_records: Dict[str, Any],
+) -> None:
+    """
+    Записывает в curr_records состояния файлов (изменен, не изменён, создан)
+    на основании данных из prev_records. Изменяет переданный curr_records!
+
+    Args:
+        prev_records (dict): словарь с предыдущими записями о файлах.
+        curr_records (dict): словарь с актуальными записями о файлах.
+
+    Returns:
+        None: ничего не возвращает, т.к. изменяет curr_records, переданный в аргументах.
+    """
+    for filename in curr_records:
+        if filename not in prev_records:
+            curr_records[filename]['state'] = 'new'
+            continue
+
+        hash1 = curr_records[filename]['hash']
+        hash2 = prev_records[filename]['hash']
+
+        if hash1 != hash2:
+            curr_records[filename]['state'] = 'changed'
+        else:
+            curr_records[filename]['state'] = 'unchanged'
+
+
 def main() -> None:
     """
     Читает список файлов из json-конфига и получает их хеши и даты создания.
@@ -201,30 +237,18 @@ def main() -> None:
         )
         return
 
-    curr_files_data = get_curr_files_data(filenames)
-    prev_files_data = get_prev_files_data(SCRIPTS_INFO_FOLDER)
+    curr_records = get_curr_files_data(filenames)
+    prev_records = get_prev_files_data(SCRIPTS_INFO_FOLDER)
 
-    # TODO: вынести цикл в функцию set_changed_files
-    for filename in curr_files_data:
-        if filename not in prev_files_data:
-            curr_files_data[filename]['state'] = 'new'
-            continue
+    mark_changed_files(prev_records, curr_records)
 
-        hash1 = curr_files_data[filename]['hash']
-        hash2 = prev_files_data[filename]['hash']
-
-        if hash1 != hash2:
-            curr_files_data[filename]['state'] = 'changed'
-        else:
-            curr_files_data[filename]['state'] = 'unchanged'
-
-    date_str = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    date_str = datetime.now().strftime("%Y%m%dT%H%M%S")
     filename4dump = f'{SCRIPTS_INFO_FOLDER}/scripts_info_{date_str}.json'
     os.makedirs(Path(filename4dump).parent, exist_ok=True)
 
     try:
         with open(filename4dump, 'w') as f:
-            json.dump(curr_files_data, f, sort_keys=True, indent=4)
+            json.dump(curr_records, f, sort_keys=True, indent=4)
     except Exception as e:
         logger.critical(
             f"Невозможно записать собранные данные в файл '{filename4dump}'",
@@ -236,6 +260,22 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+
+    # Путь к конфигу .json, в котором записаны все пути к файлам, которые нужно проверить
+    try:
+        CONFIG_FILENAME = sys.argv[1]
+        loaded_config = get_config(CONFIG_FILENAME)
+    except Exception as ex:
+        print("Не удалось загрузить конфиг из-за ошибки:", ex)
+        exit()
+
+    # Путь к файлу, куда будут записаны логи
+    # (лог автоматически ротируется, если достигает определённого размера)
+    LOG_FILENAME = loaded_config['log_file']
+
+    # Папка, куда будут записаны json'ки с хешами и другими данными файлов
+    SCRIPTS_INFO_FOLDER = loaded_config['records_folder']
+
     log_filename = Path(LOG_FILENAME)
     os.makedirs(log_filename.parent, exist_ok=True)
 

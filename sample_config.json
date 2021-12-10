@@ -2,5 +2,7 @@
   "files": [
     "/home/username/hello.txt",
     "/home/username/hello2.txt"
-  ]
+  ],
+  "log_file": "/home/username/logs/hashscript.log",
+  "records_folder": "/home/username/scripts_info"
 }
