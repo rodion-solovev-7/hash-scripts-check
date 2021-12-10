@@ -10,9 +10,15 @@ from pathlib import Path
 from typing import Union, List, Any, Dict
 
 
+# Путь к файлу, куда будут записаны логи
+# (лог автоматически ротируется, если достигает определённого размера)
 LOG_FILENAME = './logs/hashscript.log'
+
+# Путь к конфигу .json, в котором записаны все пути к файлам, которые нужно проверить
 CONFIG_FILENAME = './config.json'
-SCRIPTS_INFO_FOLDER = './scripts_info/'
+
+# Папка, куда будут записаны json'ки с хешами и другими данными файлов
+SCRIPTS_INFO_FOLDER = './scripts_info'
 
 
 def setup_logger(
@@ -33,7 +39,7 @@ def setup_logger(
     formatter = logging.Formatter('%(asctime)s  %(levelname)s: %(message)s')
     file_handler = RotatingFileHandler(
         filename=filename,
-        maxBytes=5 * (2 ** 20),  # 5 MB
+        maxBytes=1 * (2 ** 20),  # 1 MB
         backupCount=20,
     )
     file_handler.setLevel(level)
@@ -52,7 +58,7 @@ def setup_logger(
 
 def get_file_list_from_json(filename: str) -> List[str]:
     """
-    Читает список файлов из yaml.
+    Читает список файлов из json.
 
     Args:
         filename: имя конфиг-файла.
@@ -103,7 +109,7 @@ def get_modification_date(filename: str) -> str:
     return str_time
 
 
-def get_files_data(filenames: List[str]) -> Dict[str, Any]:
+def get_curr_files_data(filenames: List[str]) -> Dict[str, Any]:
     """
     Возвращает словарь, где каждому имени файла соответствует хеш и дата редактирования.
 
@@ -137,6 +143,29 @@ def get_files_data(filenames: List[str]) -> Dict[str, Any]:
     return files_data
 
 
+def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
+    """
+    Возвращает словарь, где каждому имени файла соответствует хеш и дата редактирования.
+    Если в папке не оказывается записей, то возвращается .
+
+    Args:
+        folder (str): путь к папке с записями о файлах.
+
+    Returns:
+        dict: словарь с ключём-именем файла, содержащий словари с данными об этих файлах.
+    """
+    last_info_filename = get_last_info_filename(folder)
+    if last_info_filename is not None:
+        try:
+            with open(last_info_filename, 'rb') as f:
+                prev_files_data = json.load(f)
+            return prev_files_data
+
+        except Exception as e:
+            logger.error(f"Невозможно прочитать данные из '{last_info_filename}'", exc_info=e)
+            return {}
+
+
 def get_last_info_filename(folder: Union[str, Path]) -> Union[str, None]:
     """
     Возвращает последний актуальный файл с записями.
@@ -165,42 +194,37 @@ def main() -> None:
     try:
         filenames = get_file_list_from_json(CONFIG_FILENAME)
     except Exception as e:
-        logger.critical(f"Ошибка во время чтения списка файлов из '{CONFIG_FILENAME}'. "
-                        f"Закрытие программы!", exc_info=e)
+        logger.critical(
+            f"Ошибка во время чтения списка файлов из '{CONFIG_FILENAME}'. "
+            f"Закрытие программы!",
+            exc_info=e,
+        )
         return
 
-    files_data = get_files_data(filenames)
+    curr_files_data = get_curr_files_data(filenames)
+    prev_files_data = get_prev_files_data(SCRIPTS_INFO_FOLDER)
 
-    prev_files_data = {}
-    last_info_filename = get_last_info_filename(SCRIPTS_INFO_FOLDER)
-    if last_info_filename is not None:
-        try:
-            with open(last_info_filename, 'rb') as f:
-                prev_files_data = json.load(f)
-
-        except Exception as e:
-            logger.error(f"Невозможно прочитать данные из '{last_info_filename}'", exc_info=e)
-
-    for filename in files_data:
+    # TODO: вынести цикл в функцию set_changed_files
+    for filename in curr_files_data:
         if filename not in prev_files_data:
-            files_data[filename]['state'] = 'new'
+            curr_files_data[filename]['state'] = 'new'
             continue
 
-        hash1 = files_data[filename]['hash']
+        hash1 = curr_files_data[filename]['hash']
         hash2 = prev_files_data[filename]['hash']
 
         if hash1 != hash2:
-            files_data[filename]['state'] = 'changed'
+            curr_files_data[filename]['state'] = 'changed'
         else:
-            files_data[filename]['state'] = 'unchanged'
+            curr_files_data[filename]['state'] = 'unchanged'
 
     date_str = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    filename4dump = f'{SCRIPTS_INFO_FOLDER}scripts_info_{date_str}.json'
+    filename4dump = f'{SCRIPTS_INFO_FOLDER}/scripts_info_{date_str}.json'
     os.makedirs(Path(filename4dump).parent, exist_ok=True)
 
     try:
         with open(filename4dump, 'w') as f:
-            json.dump(files_data, f, sort_keys=True, indent=4)
+            json.dump(curr_files_data, f, sort_keys=True, indent=4)
     except Exception as e:
         logger.critical(
             f"Невозможно записать собранные данные в файл '{filename4dump}'",
