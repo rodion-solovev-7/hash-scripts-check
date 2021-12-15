@@ -26,7 +26,10 @@ def setup_logger(
     Returns:
         logging.Logger: logger, настроенный на логирование в консоль и файл.
     """
-    formatter = logging.Formatter('%(asctime)s  %(levelname)s: %(message)s')
+    formatter = logging.Formatter(
+        fmt='%(asctime)s.%(msecs)03d | %(levelname)s | %(funcName)s:%(lineno)d - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
     file_handler = RotatingFileHandler(
         filename=filename,
         maxBytes=1 * (2 ** 20),  # 1 MB
@@ -136,13 +139,12 @@ def get_curr_files_data(filenames: List[str]) -> Dict[str, Any]:
             files_data[filename] = dict(
                 hash=file_hash,
                 modify=file_creation_date,
-                state='new',
             )
         except Exception as e:
-            logger.error(f"Невозможно получить данные о файле '{filename}'", exc_info=e)
+            logger.error(f"Невозможно получить актуальные данные о файле '{filename}'", exc_info=e)
         else:
             file_data = json.dumps(files_data[filename])
-            logger.debug(f"Получены данные о файле '{filename}':\n{file_data}")
+            logger.debug(f"Получены актуальные данные о файле '{filename}':\n{file_data}")
 
     return files_data
 
@@ -161,16 +163,23 @@ def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
     """
     last_info_filename = get_last_info_filename(folder)
     if last_info_filename is None:
+        logger.info("Не удалось получить предыдущую запись. Похоже что это первый запуск скрипта")
         return {}
 
     try:
         with open(last_info_filename, 'rb') as f:
             prev_files_data = json.load(f)
-        return prev_files_data
 
     except Exception as e:
         logger.error(f"Невозможно прочитать данные из '{last_info_filename}'", exc_info=e)
         return {}
+
+    logger.info(f"Прочитаны предыдущие данные из '{last_info_filename}'")
+
+    for filename, file_data in prev_files_data.items():
+        logger.debug(f"Получены предыдущие данные о файле '{filename}':\n{file_data}")
+
+    return prev_files_data
 
 
 def get_last_info_filename(folder: Union[str, Path]) -> Union[str, None]:
@@ -267,10 +276,11 @@ if __name__ == '__main__':
         loaded_config = get_config(CONFIG_FILENAME)
     except Exception as ex:
         print("Не удалось загрузить конфиг из-за ошибки:", ex)
-        exit()
+        exit(1)
 
     # Путь к файлу, куда будут записаны логи
     # (лог автоматически ротируется, если достигает определённого размера)
+    # noinspection PyUnboundLocalVariable
     LOG_FILENAME = loaded_config['log_file']
 
     # Папка, куда будут записаны json'ки с хешами и другими данными файлов
