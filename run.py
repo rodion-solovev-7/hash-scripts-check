@@ -34,6 +34,7 @@ def setup_logger(
         filename=filename,
         maxBytes=1 * (2 ** 20),  # 1 MB
         backupCount=20,
+        encoding='UTF-8'
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(formatter)
@@ -152,7 +153,7 @@ def get_curr_files_data(filenames: List[str]) -> Dict[str, Any]:
 def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
     """
     Возвращает словарь, где каждому имени файла соответствует хеш и дата редактирования.
-    Если в папке не оказывается записей, то возвращается .
+    Если в папке не оказывается записей, то возвращается пустой словарь.
 
     Args:
         folder (str): путь к папке с записями о файлах.
@@ -163,7 +164,8 @@ def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
     """
     last_info_filename = get_last_info_filename(folder)
     if last_info_filename is None:
-        logger.info("Не удалось получить предыдущую запись. Похоже что это первый запуск скрипта")
+        logger.info("Не удалось получить предыдущую запись. "
+                    "Похоже что это первый запуск скрипта")
         return {}
 
     try:
@@ -217,18 +219,20 @@ def mark_changed_files(
     Returns:
         None: ничего не возвращает, т.к. изменяет curr_records, переданный в аргументах.
     """
-    for filename in curr_records:
+    for filename, curr_record in curr_records.items():
         if filename not in prev_records:
-            curr_records[filename]['state'] = 'new'
+            curr_record['state'] = 'new'
             continue
 
-        hash1 = curr_records[filename]['hash']
+        hash1 = curr_record['hash']
         hash2 = prev_records[filename]['hash']
 
         if hash1 != hash2:
-            curr_records[filename]['state'] = 'changed'
+            curr_record['state'] = 'changed'
         else:
-            curr_records[filename]['state'] = 'unchanged'
+            curr_record['state'] = 'unchanged'
+
+        logger.debug(f"Финальные данные о файле '{filename}':\n{curr_record}")
 
 
 def main() -> None:
@@ -246,8 +250,8 @@ def main() -> None:
         )
         return
 
-    curr_records = get_curr_files_data(filenames)
     prev_records = get_prev_files_data(SCRIPTS_INFO_FOLDER)
+    curr_records = get_curr_files_data(filenames)
 
     mark_changed_files(prev_records, curr_records)
 
@@ -270,7 +274,7 @@ def main() -> None:
 
 if __name__ == '__main__':
 
-    # Путь к конфигу .json, в котором записаны все пути к файлам, которые нужно проверить
+    # Путь к конфигу .json, в котором записаны все пути к проверяемым файлам
     try:
         CONFIG_FILENAME = sys.argv[1]
         loaded_config = get_config(CONFIG_FILENAME)
