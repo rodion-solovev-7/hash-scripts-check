@@ -159,7 +159,7 @@ def get_prev_files_data(folder: Union[str, Path]) -> Dict[str, Dict[str, str]]:
         folder (str): путь к папке с записями о файлах.
 
     Returns:
-        dict: словарь с ключём-именем файла, содержащий словари с данными об этих файлах.
+        dict: словарь с ключом-именем файла, содержащий словари с данными об этих файлах.
         {}: пустой словарь в случае, если предыдущий файл с записями не существует или пуст.
     """
     last_info_filename = get_last_info_filename(folder)
@@ -224,8 +224,8 @@ def mark_changed_files(
             curr_record['state'] = 'new'
             continue
 
-        hash1 = curr_record['hash']
-        hash2 = prev_records[filename]['hash']
+        hash1 = str(curr_record['hash'])
+        hash2 = str(prev_records[filename]['hash'])
 
         if hash1 != hash2:
             curr_record['state'] = 'changed'
